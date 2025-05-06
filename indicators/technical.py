@@ -1,0 +1,217 @@
+"""
+Technical indicators for Bitcoin Trading Bot
+"""
+
+import pandas as pd
+import numpy as np
+import talib
+
+
+def add_all_indicators(df):
+    """
+    Add all technical indicators to DataFrame
+    
+    Args:
+        df (pd.DataFrame): DataFrame with OHLCV data
+        
+    Returns:
+        pd.DataFrame: DataFrame with added indicators
+    """
+    # Make a copy to avoid modifying the original
+    df = df.copy()
+    
+    # Make sure we have the required columns
+    required_columns = ['open', 'high', 'low', 'close', 'volume']
+    for col in required_columns:
+        if col not in df.columns:
+            raise ValueError(f"Required column {col} not found in DataFrame")
+
+    # Make sure data is properly sorted
+    if isinstance(df.index, pd.DatetimeIndex):
+        df = df.sort_index()
+    
+    # Moving Averages
+    df['ma_short'] = talib.SMA(df['close'], timeperiod=9)
+    df['ma_medium'] = talib.SMA(df['close'], timeperiod=21)
+    df['ma_long'] = talib.SMA(df['close'], timeperiod=50)
+    df['ema'] = talib.EMA(df['close'], timeperiod=20)
+    
+    # RSI
+    df['rsi'] = talib.RSI(df['close'], timeperiod=14)
+    
+    # MACD
+    macd, macd_signal, macd_hist = talib.MACD(
+        df['close'], 
+        fastperiod=12, 
+        slowperiod=26, 
+        signalperiod=9
+    )
+    df['macd'] = macd
+    df['macd_signal'] = macd_signal
+    df['macd_hist'] = macd_hist
+    
+    # Bollinger Bands
+    bb_upper, bb_middle, bb_lower = talib.BBANDS(
+        df['close'], 
+        timeperiod=20, 
+        nbdevup=2, 
+        nbdevdn=2
+    )
+    df['bb_upper'] = bb_upper
+    df['bb_middle'] = bb_middle
+    df['bb_lower'] = bb_lower
+    
+    # ATR (Average True Range) - volatility indicator
+    df['atr'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14)
+    
+    # OBV (On Balance Volume)
+    df['obv'] = talib.OBV(df['close'], df['volume'])
+    
+    # CCI (Commodity Channel Index)
+    df['cci'] = talib.CCI(df['high'], df['low'], df['close'], timeperiod=14)
+    
+    # ADX (Average Directional Index) - trend strength
+    df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
+    
+    # Stochastic
+    df['stoch_k'], df['stoch_d'] = talib.STOCH(
+        df['high'], 
+        df['low'], 
+        df['close'],
+        fastk_period=14,
+        slowk_period=3,
+        slowd_period=3
+    )
+    
+    # Price rate of change
+    df['price_change_pct'] = df['close'].pct_change()
+    
+    # Volume indicators
+    df['volume_ma'] = talib.SMA(df['volume'], timeperiod=20)
+    df['volume_change_pct'] = df['volume'].pct_change()
+    
+    # Historical returns
+    df['previous_return_1'] = df['close'].pct_change(1)
+    df['previous_return_2'] = df['close'].pct_change(2)
+    df['previous_return_3'] = df['close'].pct_change(3)
+    
+    # Volatility (standard deviation of returns)
+    df['volatility'] = df['previous_return_1'].rolling(window=14).std()
+    
+    # Advanced indicators
+    # Ichimoku Cloud
+    df['tenkan_sen'] = ichimoku_conversion_line(df)
+    df['kijun_sen'] = ichimoku_base_line(df)
+    df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
+    
+    # High-Low indicator
+    df['high_low'] = (df['high'] - df['low']) / df['close']
+    
+    # Drop NaN values
+    # df = df.dropna()
+    
+    return df
+
+
+def ichimoku_conversion_line(df, period=9):
+    """Calculate Ichimoku Conversion Line"""
+    high_period = df['high'].rolling(window=period).max()
+    low_period = df['low'].rolling(window=period).min()
+    return (high_period + low_period) / 2
+
+
+def ichimoku_base_line(df, period=26):
+    """Calculate Ichimoku Base Line"""
+    high_period = df['high'].rolling(window=period).max()
+    low_period = df['low'].rolling(window=period).min()
+    return (high_period + low_period) / 2
+
+
+def generate_signals(df):
+    """
+    Generate trading signals based on technical indicators
+    
+    Args:
+        df (pd.DataFrame): DataFrame with technical indicators
+        
+    Returns:
+        pd.DataFrame: DataFrame with signal columns
+    """
+    df = df.copy()
+    
+    # Initialize signal columns
+    df['signal_ma_cross'] = 0  # Moving average crossover
+    df['signal_rsi'] = 0       # RSI overbought/oversold
+    df['signal_macd'] = 0      # MACD crossover
+    df['signal_bb'] = 0        # Bollinger Bands
+    df['signal_final'] = 0     # Combined signal
+    
+    # MA Crossover (Short MA crosses above Medium MA)
+    df['signal_ma_cross'] = np.where(
+        (df['ma_short'] > df['ma_medium']) & 
+        (df['ma_short'].shift(1) <= df['ma_medium'].shift(1)),
+        1,  # Buy
+        np.where(
+            (df['ma_short'] < df['ma_medium']) & 
+            (df['ma_short'].shift(1) >= df['ma_medium'].shift(1)),
+            -1,  # Sell
+            0    # Hold
+        )
+    )
+    
+    # RSI (Oversold/Overbought)
+    df['signal_rsi'] = np.where(
+        (df['rsi'] < 30) & (df['rsi'].shift(1) < 30) & (df['rsi'] > df['rsi'].shift(1)),
+        1,  # Buy (RSI moving up from oversold)
+        np.where(
+            (df['rsi'] > 70) & (df['rsi'].shift(1) > 70) & (df['rsi'] < df['rsi'].shift(1)),
+            -1,  # Sell (RSI moving down from overbought)
+            0    # Hold
+        )
+    )
+    
+    # MACD Crossover
+    df['signal_macd'] = np.where(
+        (df['macd'] > df['macd_signal']) & 
+        (df['macd'].shift(1) <= df['macd_signal'].shift(1)),
+        1,  # Buy
+        np.where(
+            (df['macd'] < df['macd_signal']) & 
+            (df['macd'].shift(1) >= df['macd_signal'].shift(1)),
+            -1,  # Sell
+            0    # Hold
+        )
+    )
+    
+    # Bollinger Bands
+    df['signal_bb'] = np.where(
+        df['close'] < df['bb_lower'],
+        1,  # Buy (price below lower band)
+        np.where(
+            df['close'] > df['bb_upper'],
+            -1,  # Sell (price above upper band)
+            0    # Hold
+        )
+    )
+    
+    # Combine signals (weighted approach)
+    # You can adjust weights based on performance
+    df['signal_final'] = (
+        0.3 * df['signal_ma_cross'] +
+        0.2 * df['signal_rsi'] +
+        0.3 * df['signal_macd'] +
+        0.2 * df['signal_bb']
+    )
+    
+    # Threshold for final signal
+    df['signal_final'] = np.where(
+        df['signal_final'] > 0.2,
+        1,  # Strong buy
+        np.where(
+            df['signal_final'] < -0.2,
+            -1,  # Strong sell
+            0    # Hold
+        )
+    )
+    
+    return df
