@@ -1,15 +1,15 @@
 """
-Technical indicators for Bitcoin Trading Bot
+Technical indicators for Bitcoin Trading Bot using pandas_ta instead of talib
 """
 
 import pandas as pd
 import numpy as np
-import talib
+import pandas_ta as ta
 
 
 def add_all_indicators(df):
     """
-    Add all technical indicators to DataFrame
+    Add all technical indicators to DataFrame using pandas_ta
     
     Args:
         df (pd.DataFrame): DataFrame with OHLCV data
@@ -31,63 +31,49 @@ def add_all_indicators(df):
         df = df.sort_index()
     
     # Moving Averages
-    df['ma_short'] = talib.SMA(df['close'], timeperiod=9)
-    df['ma_medium'] = talib.SMA(df['close'], timeperiod=21)
-    df['ma_long'] = talib.SMA(df['close'], timeperiod=50)
-    df['ema'] = talib.EMA(df['close'], timeperiod=20)
+    df['ma_short'] = df.ta.sma(length=9, close='close')
+    df['ma_medium'] = df.ta.sma(length=21, close='close')
+    df['ma_long'] = df.ta.sma(length=50, close='close')
+    df['ema'] = df.ta.ema(length=20, close='close')
     
     # RSI
-    df['rsi'] = talib.RSI(df['close'], timeperiod=14)
+    df['rsi'] = df.ta.rsi(length=14, close='close')
     
     # MACD
-    macd, macd_signal, macd_hist = talib.MACD(
-        df['close'], 
-        fastperiod=12, 
-        slowperiod=26, 
-        signalperiod=9
-    )
-    df['macd'] = macd
-    df['macd_signal'] = macd_signal
-    df['macd_hist'] = macd_hist
+    macd = df.ta.macd(fast=12, slow=26, signal=9)
+    df['macd'] = macd['MACD_12_26_9']
+    df['macd_signal'] = macd['MACDs_12_26_9']
+    df['macd_hist'] = macd['MACDh_12_26_9']
     
     # Bollinger Bands
-    bb_upper, bb_middle, bb_lower = talib.BBANDS(
-        df['close'], 
-        timeperiod=20, 
-        nbdevup=2, 
-        nbdevdn=2
-    )
-    df['bb_upper'] = bb_upper
-    df['bb_middle'] = bb_middle
-    df['bb_lower'] = bb_lower
+    bbands = df.ta.bbands(length=20, std=2)
+    df['bb_upper'] = bbands['BBU_20_2.0']
+    df['bb_middle'] = bbands['BBM_20_2.0']
+    df['bb_lower'] = bbands['BBL_20_2.0']
     
     # ATR (Average True Range) - volatility indicator
-    df['atr'] = talib.ATR(df['high'], df['low'], df['close'], timeperiod=14)
+    df['atr'] = df.ta.atr(length=14)
     
     # OBV (On Balance Volume)
-    df['obv'] = talib.OBV(df['close'], df['volume'])
+    df['obv'] = df.ta.obv()
     
     # CCI (Commodity Channel Index)
-    df['cci'] = talib.CCI(df['high'], df['low'], df['close'], timeperiod=14)
+    df['cci'] = df.ta.cci(length=14)
     
     # ADX (Average Directional Index) - trend strength
-    df['adx'] = talib.ADX(df['high'], df['low'], df['close'], timeperiod=14)
+    adx = df.ta.adx(length=14)
+    df['adx'] = adx['ADX_14']
     
     # Stochastic
-    df['stoch_k'], df['stoch_d'] = talib.STOCH(
-        df['high'], 
-        df['low'], 
-        df['close'],
-        fastk_period=14,
-        slowk_period=3,
-        slowd_period=3
-    )
+    stoch = df.ta.stoch(k=14, d=3, smooth_k=3)
+    df['stoch_k'] = stoch['STOCHk_14_3_3']
+    df['stoch_d'] = stoch['STOCHd_14_3_3']
     
     # Price rate of change
     df['price_change_pct'] = df['close'].pct_change()
     
     # Volume indicators
-    df['volume_ma'] = talib.SMA(df['volume'], timeperiod=20)
+    df['volume_ma'] = df.ta.sma(length=20, close='volume')
     df['volume_change_pct'] = df['volume'].pct_change()
     
     # Historical returns
@@ -99,16 +85,13 @@ def add_all_indicators(df):
     df['volatility'] = df['previous_return_1'].rolling(window=14).std()
     
     # Advanced indicators
-    # Ichimoku Cloud
-    df['tenkan_sen'] = ichimoku_conversion_line(df)
-    df['kijun_sen'] = ichimoku_base_line(df)
-    df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
-    
     # High-Low indicator
     df['high_low'] = (df['high'] - df['low']) / df['close']
     
-    # Drop NaN values
-    # df = df.dropna()
+    # Ichimoku Cloud components - calculate manually
+    df['tenkan_sen'] = ichimoku_conversion_line(df)
+    df['kijun_sen'] = ichimoku_base_line(df)
+    df['senkou_span_a'] = ((df['tenkan_sen'] + df['kijun_sen']) / 2).shift(26)
     
     return df
 
